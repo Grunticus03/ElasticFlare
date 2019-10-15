@@ -1,0 +1,7 @@
+- pipeline.id: CloudFlare
+  path.config: "/LogStash/config/pipelines/cloudflare.yml"
+  queue.type: persisted
+  path.queue: D:/ElasticStack/Data/Queue
+  queue.page_capacity: 64mb
+  #Adjust max_bytes accordingly!
+  queue.max_bytes: 102400mb

@@ -1,0 +1,894 @@
+input {
+  file {
+  #Enterprise logs
+    id => "ELS Logs"
+    path => "/Ingest/CloudFlare/*.txt"
+    stat_interval => 2
+    start_position => "beginning"
+    close_older => 300
+    type => "activity"
+  }
+  file {
+  #Organization audit logs
+    id => "Audit Logs"
+    path => "/Ingest/CloudFlare/*.log"
+    mode => "read"
+    stat_interval => 2
+    start_position => "beginning"
+    close_older => 300
+    type => "audit"
+  }
+}
+filter {
+  mutate {
+    id => "Message Normalize"
+    lowercase => [ "message" ]
+  }
+  #ELS Logs have blank lines with only a carriage return. The following IF drops those lines to prevent false positive error messages from appearing in the logs.
+  if [message] =~ "^\r" {
+    drop {
+      id => "Remove empty lines"
+    }
+  }
+  json {
+  #Parse the data into fields
+    id => "Field Parse"
+    source => "message"
+  }
+  if [type] == "audit" {
+    mutate {
+      rename => {
+        "[id]" => "[change][id]"
+        "[interface]" => "[change][interface]"
+        "[actor][email]" => "[change][actor]"
+        "[actor][ip]" => "[change][ip]"
+        "[actor][type]" => "[change][user_type]"
+        "[actor][id]" => "[change][actor_id]"
+        "[metadata][zone_name]" => "[change][zone]"
+        "[metadata][zone_tag]" => "[change][zone_tag]"
+        "[when]" => "[change][date]"
+        "[action][result]" => "[change][success]"
+        "[action][info]" => "[change][info]"
+        "[action][type]" => "[change][activity]"
+        "[metadata][cf-ray]" => "[change][ray_id]"
+      }
+      #Use the following gsub to remove the domain from the actor name.  Change 'example' to your mail domain.
+      gsub => [
+      "[change][actor]", "\@example\.com|\@example\.net", ""
+      ]
+    }
+    mutate {
+      gsub => [
+        "[change][date]", "T|t", " ",
+        "[change][date]", "z|\..{1,6}", ""
+      ]
+    }
+    date {
+      match => [ "[change][date]", "yyyy-MM-dd HH:mm:ss" ]
+      timezone => "Etc/UTC"
+    }
+    #After running CFDictionaries script, change dictionary_path to location of file output.
+    translate {
+      field => "[change][zone]"
+      destination => "[change][zone_id]"
+      dictionary_path => "/dictionaries/cloudflareauditzones.yaml"
+      refresh_behaviour => "replace"
+    }
+    if [resource][type] == "dns_record" {
+      mutate {
+        rename => {
+          "[metadata][content]" => "[dns][content][current]"
+          "[metadata][name]" => "[dns][name][current]"
+          "[metadata][proxied]" => "[dns][proxied][current]"
+          "[metadata][ttl]" => "[dns][ttl][current]"
+          "[metadata][prio]" => "[dns][priority][current]"
+          "[metadata][old_content]" => "[dns][content][previous]"
+          "[metadata][old_name]" => "[dns][name][previous]"
+          "[metadata][old_proxied]" => "[dns][proxied][previous]"
+          "[metadata][old_ttl]" => "[dns][ttl][previous]"
+          "[metadata][old_prio]" => "[dns][priority][previous]"
+          "[metadata][type]" => "[dns][type]"
+        }
+      }
+      #Add CloudFlare API Key and Login Email to header settings below
+      if [change][activity] == "rec_add" {
+        http {
+          headers => {
+            "X-Auth-Key" => "Cloudflare API Key"
+            "X-Auth-Email" => "Cloudflare Login Email Address"
+          }
+          body_format => "json"
+          url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/dns_records/%{[resource][id]}"
+        }
+        mutate {
+          rename => {
+            "[body][result][content]" => "[dns][content][current]"
+            "[body][result][created_on]" => "[dns][created_on]"
+            "[body][result][modified_on]" => "[dns][modified_on]"
+            "[body][result][name]" => "[dns][name][current]"
+            "[body][result][proxiable]" => "[dns][proxiable][current]"
+            "[body][result][proxied]" => "[dns][proxied][current]"
+            "[body][result][ttl]" => "[dns][ttl][current]"
+            "[body][result][type]" => "[dns][type]"
+          }
+        }
+        if "_httprequestfailure" in [tags] {
+          mutate {
+            remove_tag => [ "_httprequestfailure" ]
+            add_tag => [ "record_deleted" ]
+          }
+        }
+      }
+      translate {
+        field => "[change][activity]"
+        destination => "[change][activity]"
+        dictionary => {
+          "rec_add" => "create"
+          "set" => "update"
+          "delete" => "delete"
+        }
+        refresh_behaviour => "replace"
+        override => true
+      }
+    }
+    #Add CloudFlare API Key and Login Email to header settings below
+    if [resource][type] == "firewallrules" {
+      http {
+        headers => {
+            "X-Auth-Key" => "Cloudflare API Key"
+            "X-Auth-Email" => "Cloudflare Login Email Address"
+        }
+        url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/rules/%{[resource][id]}"
+      }
+      mutate {
+        rename => {
+          "[body][result][action]" => "[rule][action]"
+          "[body][result][created_on]" => "[rule][created_on]"
+          "[body][result][description]" => "[rule][description]"
+          "[body][result][filter][expression]" => "[rule][expression]"
+          "[body][result][paused]" => "[rule][enabled]"
+          "[body][result][modified_on]" => "[rule][modified_on]"
+          "[body][result][priority]" => "[rule][priority]"
+        }
+      }
+      translate {
+        field => "[rule][enabled]"
+        destination => "[rule][enabled]"
+        dictionary => {
+          "false" => "true"
+          "true" => "false"
+        }
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        field => "[change][activity]"
+        destination => "[change][activity]"
+        dictionary => {
+          "firewallrulesapi_update" => "update"
+          "firewallrulesapi_create" => "create"
+          "firewallrulesapi_delete" => "delete"
+        }
+        refresh_behaviour => "replace"
+        override => true
+      }
+    }
+    #Add CloudFlare API Key and Login Email to header settings below
+    if [resource][type] == "filter" {
+      http {
+        headers => {
+            "X-Auth-Key" => "Cloudflare API Key"
+            "X-Auth-Email" => "Cloudflare Login Email Address"
+        }
+        url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/filters/%{[resource][id]}"
+      }
+      mutate {
+        rename => {
+        "[body][result][expression]" => "[filter][expression]"
+        "[body][result][paused]" => "[filter][enabled]"
+        }
+      }
+      translate {
+        field => "[filter][enabled]"
+        destination => "[filter][enabled]"
+        dictionary => {
+          "false" => "true"
+          "true" => "false"
+        }
+        refresh_behaviour => "replace"
+        override => true
+      }
+    }
+    if [resource][type] == "account" {
+      if [change][activity] == "add_member" or [change][activity] == "accept_member" or [change][activity] == "expire_member" or [change][activity] == "remove_member" or [change][activity] == "set_member_roles" {
+        mutate {
+          rename => {
+          "[metadata][account_name]" => "[new_user][account]"
+          "[metadata][user_email]" => "[new_user][email]"
+          "[metadata][roles]" => "[new_user][roles]"
+          "[metadata][acted_on_behalf_of]" => "[new_user][creator]"
+          }
+        }
+      }
+      if [change][activity] == "mfa_enabled" or [change][activity] == "mfa_disabled" {
+        mutate {
+          rename => {
+            "[metadata][mfa_type]" => "[mfa][type]"
+            "[metadata][acted_on_behalf_of]" => "[change][actor]"
+          }
+          add_field => {
+            "[mfa][state]" => "%{[change][info]}"
+          }
+        }
+        mutate {
+          gsub => [
+            "[mfa][state]", ".*(?!\w*$) ", ""
+          ]
+        }
+      }
+      if [change][activity] == "logout" {
+        mutate {
+          rename => {
+            "[metadata][acted_on_behalf_of]" => "[change][actor]"
+          }
+        }
+      }
+      if [change][activity] == "delete" {
+        mutate {
+          rename => {
+            "[metadata][content]" => "[dns][content][current]"
+            "[metadata][name]" => "[dns][name][current]"
+          }
+          update => {
+            "[resource][type]" => "dns_record"
+          }
+        }
+      }
+    }
+    if [resource][type] == "zone" {
+      if [change][activity] == "toggle_waf_set" {
+        if [metadata][pack] == "cloudflare" {
+          #Add CloudFlare API Key and Email address to header below
+          http {
+            body_format => "json"
+            headers => {
+              "X-Auth-Key" => "Cloudflare API Key"
+              "X-Auth-Email" => "Cloudflare Login Email Address"
+            }
+            url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=CloudFlare"
+          }
+          mutate {
+            add_field => {
+              "[package][detection]" => "%{[body][result]}"
+            }
+          }
+        }
+        #Add CloudFlare API Key and Email address to header below
+        else if [metadata][pack] == "owasp" {
+          http {
+            body_format => "json"
+            headers => {
+              "X-Auth-Key" => "Cloudflare API Key"
+              "X-Auth-Email" => "Cloudflare Login Email Address"
+            }
+            url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=OWASP%20ModSecurity%20Core%20Rule%20Set"
+          }
+          mutate {
+            add_field => {
+              "[package][detection]" => "%{[body][result]}"
+              "[package][action]" => "%{[body][result]}"
+              "[package][sensitivity]" => "%{[body][result]}"
+            }
+          }
+        }
+        #Add CloudFlare API Key and Email address to header below
+        else if [metadata][pack] == "internal" {
+          http {
+            body_format => "json"
+            headers => {
+              "X-Auth-Key" => "Cloudflare API Key"
+              "X-Auth-Email" => "Cloudflare Login Email Address"
+            }
+            url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=USER"
+          }
+          mutate {
+            add_field => {
+              "[package][detection]" => "%{[body][result]}"
+            }
+          }
+        }
+        mutate {
+          gsub => [
+            "[package][detection]", ".*(?=detection_mode=\w*)|, name.*", "",
+            "[package][action]", ".*(?=action_mode=\w*)", "",
+            "[package][sensitivity]", ".*(?=sensitivity=\w*)", "",
+            "[package][detection]", "detection_mode=", "",
+            "[package][action]", "action_mode=|\}", "",
+            "[package][sensitivity]", "sensitivity=|,.*", ""
+          ]
+        }
+        mutate {
+          rename => {
+            "[metadata][pack]" => "[waf][package]"
+            "[metadata][set]" => "[waf][rule_group]"
+            "[metadata][rule_id]" => "[waf][rule_id]"
+            "[metadata][rule_desc]" => "[waf][rule_description]"
+            "[metadata][value]" => "[waf][value]"
+          }
+        }
+      }
+      if [change][activity] == "toggle_waf_rule" {
+        mutate {
+          rename => {
+            "[metadata][pack]" => "[waf][package]"
+            "[metadata][set]" => "[waf][rule_group]"
+            "[metadata][rule_id]" => "[waf][rule_id]"
+            "[metadata][rule_desc]" => "[waf][rule_description]"
+            "[metadata][value]" => "[waf][value]"
+          }
+        }
+      }
+      if [change][activity] == "change_setting" {
+        if [metadata][name] == "auto_minify" {
+          mutate {
+            rename => {
+              "[metadata][old_value][css]" => "[setting][auto_minify][previous][css]"
+              "[metadata][old_value][html]" => "[setting][auto_minify][previous][html]"
+              "[metadata][old_value][js]" => "[setting][auto_minify][previous][js]"
+              "[metadata][value][css]" => "[setting][auto_minify][current][css]"
+              "[metadata][value][html]" => "[setting][auto_minify][current][html]"
+              "[metadata][value][js]" => "[setting][auto_minify][current][js]"
+              "[metadata][name]" => "[setting][name]"
+              "[metadata][type]" => "[setting][type]"
+            }
+          }
+        }
+        else if [metadata][name] == "mobile_redirect" {
+          mutate {
+            rename => {
+              "[metadata][old_value][enabled]" => "[setting][mobile_redirect][previous][enabled]"
+              "[metadata][old_value][path]" => "[setting][mobile_redirect][previous][path]"
+              "[metadata][old_value][subdomain]" => "[setting][mobile_redirect][previous][subdomain]"
+              "[metadata][value][enabled]" => "[setting][mobile_redirect][current][enabled]"
+              "[metadata][value][path]" => "[setting][mobile_redirect][current][path]"
+              "[metadata][value][subdomain]" => "[setting][mobile_redirect][current][subdomain]"
+              "[metadata][name]" => "[setting][name]"
+              "[metadata][type]" => "[setting][type]"
+            }
+          }
+        } else {
+          mutate {
+            rename => {
+              "[metadata][name]" => "[setting][name]"
+              "[metadata][type]" => "[setting][type]"
+              "[metadata][value]" => "[setting][value][current]"
+              "[metadata][old_value]" => "[setting][value][previous]"
+              "[metadata][acted_on_behalf_of]" => "[setting][on_behalf]"
+            }
+          }
+        }
+      }
+      if [change][activity] == "zone_reset_check" {
+        mutate {
+          add_field => {
+            "[change][zone]" => "%{[change][info]}"
+          }
+        }
+        mutate {
+          gsub => [
+            "[change][zone]", "^\w*\(.*\) ", ""
+          ]
+        }
+      }
+      #Add CloudFlare API Key and Email Address to header below
+      if [change][activity] == "set_min_tls_version" {
+        http {
+          body_format => "json"
+          headers => {
+            "X-Auth-Key" => "Cloudflare API Key"
+            "X-Auth-Email" => "Cloudflare Login Email Address"
+          }
+          url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/settings/min_tls_version"
+        }
+        mutate {
+          rename => {
+            "[body][result][value]" => "[min_tls]"
+          }
+        }
+      }
+    }
+    if [resource][type] == "pagerule" {
+      mutate {
+        rename => {
+          "[metadata][pr_behavior][apps]" => "[page_rule][apps][current]"
+          "[metadata][pr_behavior][browser_cache_ttl]" => "[page_rule][browser_cache_ttl][current]"
+          "[metadata][pr_behavior][browser_integrity_check]" => "[page_rule][browser_integrity_check][current]"
+          "[metadata][pr_behavior][cache_level]" => "[page_rule][cache_level][current]"
+          "[metadata][pr_behavior][forward_status_code]" => "[page_rule][forward_status][current]"
+          "[metadata][pr_behavior][forward_url]" => "[page_rule][forward_url][current]"
+          "[metadata][pr_behavior][mirage]" => "[page_rule][mirage][current]"
+          "[metadata][pr_behavior][origin_error_pass_thru]" => "[page_rule][origin_error_pass_thru][current]"
+          "[metadata][pr_behavior][performance]" => "[page_rule][performance][current]"
+          "[metadata][pr_behavior][polish]" => "[page_rule][polish][current]"
+          "[metadata][pr_behavior][query_string_sort]" => "[page_rule][query_string_sort][current]"
+          "[metadata][pr_behavior][rocket_loader]" => "[page_rule][rocket_loader][current]"
+          "[metadata][pr_behavior][security]" => "[page_rule][security][current]"
+          "[metadata][pr_behavior][security_level]" => "[page_rule][security_level][current]"
+          "[metadata][pr_behavior][web_application_firewall]" => "[page_rule][waf][current]"
+          "[metadata][pr_match]" => "[page_rule][match_pattern][current]"
+          "[metadata][pr_priority]" => "[page_rule][priority][current]"
+          "[metadata][pr_status]" => "[page_rule][status][current]"
+          "[metadata][old_pr_behavior][apps]" => "[page_rule][apps][previous]"
+          "[metadata][old_pr_behavior][browser_cache_ttl]" => "[page_rule][browser_cache_ttl][previous]"
+          "[metadata][old_pr_behavior][browser_integrity_check]" => "[page_rule][browser_integrity_check][previous]"
+          "[metadata][old_pr_behavior][cache_level]" => "[page_rule][cache_level][previous]"
+          "[metadata][old_pr_behavior][forward_status_code]" => "[page_rule][forward_status][previous]"
+          "[metadata][old_pr_behavior][forward_url]" => "[page_rule][forward_url][previous]"
+          "[metadata][old_pr_behavior][mirage]" => "[page_rule][mirage][previous]"
+          "[metadata][old_pr_behavior][origin_error_pass_thru]" => "[page_rule][origin_error_pass_thru][previous]"
+          "[metadata][old_pr_behavior][performance]" => "[page_rule][performance][previous]"
+          "[metadata][old_pr_behavior][polish]" => "[page_rule][polish][previous]"
+          "[metadata][old_pr_behavior][query_string_sort]" => "[page_rule][query_string_sort][previous]"
+          "[metadata][old_pr_behavior][rocket_loader]" => "[page_rule][rocket_loader][previous]"
+          "[metadata][old_pr_behavior][security]" => "[page_rule][security][previous]"
+          "[metadata][old_pr_behavior][security_level]" => "[page_rule][security_level][previous]"
+          "[metadata][old_pr_behavior][web_application_firewall]" => "[page_rule][waf][previous]"
+          "[metadata][old_pr_match]" => "[page_rule][match_pattern][previous]"
+          "[metadata][old_pr_priority]" => "[page_rule][priority][previous]"
+          "[metadata][old_pr_status]" => "[page_rule][status][previous]"
+        }
+        gsub => [
+          "[page_rule][browser_cache_ttl][current]", "s", "",
+          "[page_rule][browser_cache_ttl][previous]", "s", ""
+        ]
+      }
+    }
+    if [resource][type] == "user" {
+      if [change][activity] == "join_org" {
+        mutate {
+          rename => {
+            "[metadata][account_name]" => "[new_user][account]"
+            "[metadata][user_email]" => "[new_user][email]"
+          }
+        }
+      }
+    }
+    mutate {
+      lowercase => [
+        "[dns][type]"
+      ]
+      remove_field => [
+        "[body]",
+        "[headers]",
+        "[metadata][zone_id]"
+      ]
+    }
+  }
+  else if [type] == "activity" {
+    #The following IF/ELSE statement creates the 'full_url' field by combining clientrequesthost and clientrequesturi fields.  If you don't see a need for it, you are safe to remove it.
+    if [clientsslprotocol] == "none" {
+      mutate {
+        id => "Full URL - HTTP"
+        add_field => {
+          "full_url" => "http://%{clientrequesthost}%{clientrequesturi}"
+        }
+      }
+    } else {
+      mutate {
+        id => "Full URL - HTTPS"
+        add_field => {
+          "full_url" => "https://%{clientrequesthost}%{clientrequesturi}"
+        }
+      }
+    }
+    #Enrich each event with location data extracted from the clientip field.
+    geoip {
+      id => "ClientIP Geo"
+      source => "clientip"
+      fields => [city_name,country_name,latitude,longitude,timezone ]
+      target => "[client][location]"
+      add_field => {
+        "[client][location][coordinates]" => "%{[client][location][latitude]}, %{[client][location][longitude]}"
+      }
+    }
+    #Parse the data in clientrequestuseragent field.
+    #Change regexes path to location of uaregexes file.
+    useragent {
+      id => "User Agent Parse"
+      source => "clientrequestuseragent"
+      target => "[client][user_agent]"
+      regexes => "\dictionaries\uaregexes.yaml"
+    }
+    #General field modifications
+    mutate {
+      id => "Field Mod. Stage 1"
+      gsub => [
+        "originresponsehttpexpires", " ...$|^..., ", "",
+        "originresponsehttplastmodified", " ...$|^..., ", ""
+      ]
+      add_field => {
+        "domain" => "%{clientrequesthost}"
+      }
+    }
+    mutate {
+      id => "Field Mod. Stage 2"
+      gsub => [
+        "domain", ".*(?=\..*\..*$)\.", "",
+        "cachecachestatus", "unknown", "uncacheable",
+        "originsslprotocol", "unknown", "none",
+        "wafaction", "unknown", "pass",
+        "wafprofile", "unknown", "none"
+      ]
+    }
+    #Set dictionary_path to correct filepath
+    translate {
+      id => "CacheResponse Translate"
+      dictionary_path => "dictionaries/httpstatuscodes.yaml"
+      field => "cacheresponsestatus"
+      destination => "cacheresponsestatusdescription"
+      refresh_behaviour => "replace"
+    }
+    #Set dictionary_path to correct filepath
+    translate {
+      id => "EdgeResponse Translate"
+      dictionary_path => "dictionaries/httpstatuscodes.yaml"
+      field => "edgeresponsestatus"
+      destination => "edgeresponsestatusdescription"
+      refresh_behaviour => "replace"
+    }
+    #Set dictionary_path to correct filepath
+    translate {
+      id => "OriginResponse Translate"
+      dictionary_path => "dictionaries/httpstatuscodes.yaml"
+      field => "originresponsestatus"
+      destination => "originresponsestatusdescription"
+      refresh_behaviour => "replace"
+    }
+    translate {
+      id => "Edge Pathing Source Translate"
+      field => "edgepathingsrc"
+      destination => "edgepathingsrcdescription"
+      dictionary => {
+        "bic" => "Browser Integrity Check"
+        "err" => "An error, typically 1XXX type error"
+        "filterbasedfirewall" => "User defined firewall rule"
+        "hot" => "Hot Linking"
+        "macro" => "Macro (e.g. IP reputation based, or grey listing)"
+        "pathing" => "Operation (EdgePathingOp)"
+        "protect" => "Gatebot"
+        "skip" => "Always Online / CDNJS / JSDelivr whitelisting source code"
+        "undef" => "invalid HTTP"
+        "unknown" => "Not classified"
+        "user" => "User rule (e.g. country block, IP block etc)"
+      }
+    }
+    translate {
+      id => "Edge Pathing Operation Translate"
+      field => "edgepathingop"
+      destination => "edgepathingopdescription"
+      dictionary => {
+        "bad visitor" => "failed challenge"
+        "ban" => "Ban - request was blocked"
+        "chl" => "Challenge - request was challenged"
+        "err_host" => "The request returned an error, typically 1XXX type error"
+        "pathing" => "Status (EdgePathingStatus)"
+        "temp_Ok" => "Clearance cookie issued (e.g. visitor passed a JS or Captcha Challenge)"
+        "unknown" => "No specific action"
+        "wl" => "Whitelist - this is the default for visitors, so request is allowed to proceed normally"
+      }
+    }
+    translate {
+      id => "Edge Pathing Status Translate"
+      field => "edgepathingstatus"
+      destination => "edgepathingstatusdescription"
+      dictionary => {
+        "aocrawl" => "Always Online Crawler"
+        "bak" => "IP Whitelisted - Backup Service"
+        "badok" => "Threat Scored, but not challenged (score too low)"
+        "bad_host" => "Bad or no host header"
+        "captchanew" => "User got a new captcha challenge"
+        "captchaok" => "User already has cookie"
+        "captchaerr" => "Captcha failed, incorrect input"
+        "captchasucc" => "Captcha passed, cookie issued"
+        "cdnjs" => "Request to a cdnjs resource"
+        "chl" => "Captcha/JS Challenege Presented"
+        "ctry" => "Country Block"
+        "cyclic" => "CloudFlare Loop"
+        "dnserr" => "DNS 1001 Error"
+        "grey" => "Greylisted"
+        "ip" => "Individual IP Blocked"
+        "ipr16" => "IP /16 Range Blocked"
+        "ipr24" => "IP /24 Range Blocked"
+        "jschlerr" => "JavaScript failed, incorrect input"
+        "jschlfail" => "JavaScript failed"
+        "jschlnew" => "JavaScript challenge issued"
+        "jschlok" => "User already has cookie"
+        "jschlsucc" => "JavaScript pass, cookie issued"
+        "l7ddos" => "L7 DDoS Attack Mitigation"
+        "mob" => "IP Whitelisted - Mobile Proxy Service"
+        "mon" => "IP Whitelisted - Monitoring Service"
+        "no_existing_host" => "Ownership lookup failed; host not on CloudFlare"
+        "nr" => "No Reputation Data For IP"
+        "reserved_ip" => "DNS points to local or disallowed IP"
+        "reserved_ip6" => "DNS points to local or disallowed IPv6"
+        "scan" => "IP Whitelisted - Security Scanning Service"
+        "se" => "IP Whitelisted - Search Engine"
+        "snimismatch" => "1013 Error"
+        "tempok" => "Captcha/JS Challenege"
+        "ua" => "Blacked User Agent"
+        "unknown" => "pathing status is unknown; process as normal"
+        "wl" => "IP Whitelisted"
+        "zl" => "Lockdown applied"
+      }
+    }
+    translate {
+      id => "SSL Protocol Rating"
+      field => "clientsslcipher"
+      destination => "clientsslciphergrade"
+      dictionary => {
+        "aead-aes128-gcm-sha256" => "A+"
+        "aead-chacha20-poly1305-sha256" => "A+"
+        "dhe-rsa-aes256-gcm-sha384" => "A+"
+        "dhe-rsa-aes128-gcm-sha256" => "A+"
+        "ecdhe-rsa-aes256-gcm-sha384" => "A+"
+        "ecdhe-rsa-aes128-gcm-sha256" => "A+"
+        "dhe-rsa-aes256-sha256" => "A"
+        "dhe-rsa-aes128-sha256" => "A"
+        "ecdhe-rsa-aes256-sha384" => "A"
+        "ecdhe-rsa-aes128-sha256" => "A"
+        "ecdhe-rsa-aes256-sha" => "B"
+        "ecdhe-rsa-aes128-sha" => "B"
+        "aes256-gcm-sha384" => "C"
+        "aes128-gcm-sha256" => "C"
+        "aes256-sha256" => "C"
+        "aes128-sha256" => "C"
+        "aes256-sha" => "C"
+        "aes128-sha" => "C"
+        "dhe-rsa-aes256-sha" => "C"
+        "dhe-rsa-aes128-sha" => "C"
+        "des-cbc3-sha" => "D"
+        "none" => "F"
+      }
+    }
+    translate {
+      id => "Security Level"
+      field => "securitylevel"
+      destination => "securitylevel"
+      override => true
+      dictionary => {
+        "low" => "low"
+        "med" => "medium"
+        "high" => "high"
+        "hi" => "high"
+      }
+    }
+    #Set dictionary_path to correct filepath
+    translate {
+      field => "[domain]"
+      destination => "[zone-id]"
+      dictionary_path => "/dictionaries/cloudflareauditzones.yaml"
+      refresh_behaviour => "replace"
+    }
+    #Set CloudFlare API Key and Email address in header below
+    if "firewallrules" in [firewallmatchessources] {
+      http {
+        headers => {
+            "X-Auth-Key" => "Cloudflare API Key"
+            "X-Auth-Email" => "Cloudflare Login Email Address"
+        }
+        body_format => "json"
+        url => "https://api.cloudflare.com/client/v4/zones/%{[zone-id]}/firewall/rules/%{[firewallmatchesruleids]}"
+      }
+    }
+    if "ban" in [edgepathingop] or "chl" in [edgepathingop] or "bad visitor" in [edgepathingop] or "drop" in [wafaction] or "challenge allow" in [wafaction] {
+      mutate {
+        id => "Mark As Blocked"
+        add_field => {
+          "blocked" => "true"
+        }
+      }
+      if "drop" in [wafaction] or "challenge allow" in [wafaction] {
+        mutate {
+          id => "Blocked By WAF"
+          add_field => {
+            "blocked_reason" => "%{wafrulemessage}"
+          }
+        }
+      }
+      if "ban" in [edgepathingop] or "bad visitor" in [edgepathingop] {
+        mutate {
+          id => "Blocked By Edge"
+          add_field => {
+            "blocked_reason" => "%{edgepathingsrcdescription}"
+          }
+        }
+      }
+      if "chl" in [edgepathingop] {
+        mutate {
+          id => "Blocked and Challenged"
+          add_field => {
+            "blocked_reason" => "%{edgepathingstatusdescription}"
+          }
+        }
+      }
+    } else {
+      mutate {
+        id => "Mark As Not Blocked"
+        add_field => {
+          "blocked" => "false"
+        }
+      }
+    }
+    if [originip] == "" {
+      mutate {
+        id => "Remove Blank Origin IP"
+        remove_field => [ "originip" ]
+      }
+    }
+    if [edgeserverip] == "" {
+      mutate {
+        id => "Remove Blank Edge IP"
+        remove_field => [ "edgeserverip" ]
+      }
+    }
+    if [originresponsehttpexpires] == "" {
+      mutate {
+        id => "Remove Blank HTTP Expires"
+        remove_field => [ "originresponsehttpexpires" ]
+      }
+    }
+    if [originresponsehttplastmodified] == "" {
+      mutate {
+        id => "Remove Blank HTTP Last Modified"
+        remove_field => [ "originresponsehttplastmodified" ]
+      }
+    }
+    date {
+      id => "Date Format HTTP Expires"
+      match => [ "originresponsehttpexpires", "dd MMM yyyy HH:mm:ss" ]
+      target => "originresponsehttpexpires"
+      timezone => "Etc/UTC"
+    }
+    date {
+      id => "Date Format HTTP Last Modified"
+      match => [ "originresponsehttplastmodified", "dd MMM yyyy HH:mm:ss" ]
+      target => "originresponsehttplastmodified"
+      timezone => "Etc/UTC"
+    }
+    if [clientrequesturi] and [clientrequesturi] =~ ".*\?.*" {
+      mutate {
+        add_field => {
+          "clientrequestquery" => "%{[clientrequesturi]}"
+        }
+      }
+      mutate {
+        gsub => [
+          "clientrequestquery", "^.*\?", ""
+        ]
+      }
+    }
+    if [clientrequestquery] {
+      mutate {
+        convert => {
+          "clientrequestquery" => "string"
+        }
+      }
+      urldecode {
+        field => "clientrequestquery"
+      }
+    }
+    #The following IF will drop any json parsing failures.
+    #This may or may not be desirable for your solutions.
+    if "_jsonparsefailure" in [tags] {
+      drop {
+        id => "JSON Parse Fail Drop"
+      }
+    }
+    mutate {
+      id => "Restructure To Objects"
+      rename => {
+        "[body][result][action]" => "[edge][firewall][rule][action]"
+        "[body][result][description]" => "[edge][firewall][rule][description]"
+        "[body][result][filter][expression]" => "[edge][firewall][rule][filter]"
+        "cacheresponsebytes" => "[cache][response][bytes]"
+        "cacheresponsestatus" => "[cache][response][status]"
+        "cacheresponsestatusdescription" => "[cache][response][status_description]"
+        "cachecachestatus" => "[cache][status]"
+        "cachetieredfill" => "[cache][tiered_fill]"
+        "clientasn" => "[client][asn]"
+        "clientcountry" => "[client][location][country_cf]"
+        "clientdevicetype" => "[client][device_type]"
+        "clientip" => "[client][ip]"
+        "clientipclass" => "[client][ip_class]"
+        "[client][location][country_name]" => "[client][location][country]"
+        "[client][location][city_name]" => "[client][location][city]"
+        "clientrequestbytes" => "[client][request][bytes]"
+        "clientrequesthost" => "[client][request][host]"
+        "clientrequestmethod" => "[client][request][method]"
+        "clientrequestpath" => "[client][request][path]"
+        "clientrequestprotocol" => "[client][request][protocol]"
+        "clientrequestquery" => "[client][request][query]"
+        "clientrequestreferer" => "[client][request][referer]"
+        "clientrequesturi" => "[client][request][uri]"
+        "clientrequestuseragent" => "[client][request][user_agent]"
+        "clientsslcipher" => "[client][ssl][cipher]"
+        "clientsslciphergrade" => "[client][ssl][cipher_grade]"
+        "clientsslprotocol" => "[client][ssl][protocol]"
+        "clientsrcport" => "[client][src_port]"
+        "clientxrequestedwith" => "[client][header][x-requested-with]"
+        "edgecoloid" => "[edge][colo_id]"
+        "edgeendtimestamp" => "[edge][timestamp_end]"
+        "edgepathingop" => "[edge][pathing][op]"
+        "edgepathingopdescription" => "[edge][pathing][op_description]"
+        "edgepathingsrc" => "[edge][pathing][src]"
+        "edgepathingsrcdescription" => "[edge][pathing][src_description]"
+        "edgepathingstatus" => "[edge][pathing][status]"
+        "edgepathingstatusdescription" => "[edge][pathing][status_description]"
+        "edgeratelimitaction" => "[edge][ratelimit_action]"
+        "edgeratelimitid" => "[edge][ratelimit_id]"
+        "edgerequesthost" => "[edge][request_host]"
+        "edgeresponsebytes" => "[edge][response][bytes]"
+        "edgeresponsecompressionratio" => "[edge][response][compression_ratio]"
+        "edgeresponsecontenttype" => "[edge][response][content_type]"
+        "edgeresponsestatus" => "[edge][response][status]"
+        "edgeresponsestatusdescription" => "[edge][response][status_description]"
+        "edgeserverip" => "[edge][server_ip]"
+        "edgestarttimestamp" => "[edge][timestamp_start]"
+        "firewallmatchesactions" => "[firewall][matches][actions]"
+        "firewallmatchesruleids" => "[firewall][matches][rule_ids]"
+        "firewallmatchessources" => "[firewall][matches][sources]"
+        "originip" => "[origin][ip]"
+        "originsslprotocol" => "[origin][ssl_protocol]"
+        "originresponsebytes" => "[origin][response][bytes]"
+        "originresponsehttpexpires" => "[origin][response][http_expires]"
+        "originresponsehttplastmodified" => "[origin][response][http_last_modified]"
+        "originresponsestatus" => "[origin][response][status]"
+        "originresponsestatusdescription" => "[origin][response][status_description]"
+        "originresponsetime" => "[origin][response][time]"
+        "parentrayid" => "parent_ray_id"
+        "rayid" => "ray_id"
+        "securitylevel" => "security_level"
+        "wafaction" => "[waf][action]"
+        "wafflags" => "[waf][flags]"
+        "wafmatchedvar" => "[waf][matched_variable]"
+        "wafprofile" => "[waf][profile]"
+        "wafruleid" => "[waf][rule_id]"
+        "wafrulemessage" => "[waf][rule_message]"
+        "workercputime" => "[worker][cpu_time]"
+        "workerstatus" => "[worker][status]"
+        "workersubrequest" => "[worker][subrequest]"
+        "workersubrequestcount" => "[worker][subrequest_count]"
+        "zoneid" => "zone_id"
+      }
+      remove_field => [
+        "[zone-id]"
+      ]
+    }
+  }
+}
+output {
+  if [type] == "audit" {
+    elasticsearch {
+      id => "Audit Logs to Elastic"
+      hosts => "192.168.1.1:9200"
+      document_id => "%{[change][id]}"
+      template => "/templates/cloudflareaudittemplate.json"
+      template_name => "cloudflareaudit"
+      template_overwrite => true
+      ilm_rollover_alias => "cloudflareaudit"
+      ilm_pattern => "{now/d}-000001"
+      ilm_policy => ""
+    }
+  } else {
+    elasticsearch {
+      id => "Enterprise Logs to Elastics"
+      hosts => "192.168.1.1:9200"
+      document_id => "%{[edge][timestamp_start]}%{[ray_id]}"
+      template => "/templates/cloudflaretemplate.json"
+      template_name => "cloudflare"
+      template_overwrite => true
+      index => "cloudflare-%{+YYYY.ww}"
+      ilm_policy => ""
+    }
+  }
+}

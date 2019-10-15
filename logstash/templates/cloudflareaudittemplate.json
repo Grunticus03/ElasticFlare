@@ -1,0 +1,663 @@
+{
+    "index_patterns": ["cloudflareaudit-*"],
+    "settings": {
+        "index": {
+            "number_of_shards": 1,
+            "number_of_replicas": 0,
+            "lifecycle.name": "Default",
+            "lifecycle.rollover_alias": "cloudflareaudit"
+        }
+    },
+    "mappings": {
+        "properties": {
+            "@timestamp": {
+                "type": "date"
+            },
+            "@version": {
+                "type": "keyword"
+            },
+            "action": {
+                "type": "object"
+            },
+            "change": {
+                "properties": {
+                    "activity": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "actor": {
+                        "type": "keyword"
+                    },
+                    "id": {
+                        "type": "keyword"
+                    },
+                    "info": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "interface": {
+                        "type": "keyword"
+                    },
+                    "ip": {
+                        "type": "ip",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "ray_id": {
+                        "type": "keyword"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "user_type": {
+                        "type": "keyword"
+                    },
+                    "zone": {
+                        "type": "keyword"
+                    },
+                    "zone_id": {
+                        "type": "keyword"
+                    },
+                    "zone_tag": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "dns": {
+                "properties": {
+                    "content": {
+                        "properties": {
+                            "current": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "previous": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "created_on": {
+                        "type": "date"
+                    },
+                    "modified_on": {
+                        "type": "date"
+                    },
+                    "name": {
+                        "properties": {
+                            "current": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "previous": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "priority": {
+                        "properties": {
+                            "current": {
+                                "type": "long"
+                            },
+                            "previous": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "proxiable": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "proxied": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "ttl": {
+                        "properties": {
+                            "current": {
+                                "type": "long"
+                            },
+                            "previous": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "type": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "filter": {
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "expression": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    }
+                }
+            },
+            "host": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "message": {
+                "type": "text"
+            },
+            "mfa": {
+                "properties": {
+                    "state": {
+                        "type": "keyword"
+                    },
+                    "type": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "min_tls": {
+                "type": "float"
+            },
+            "new_user": {
+                "properties": {
+                    "account": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "creator": {
+                        "type": "keyword"
+                    },
+                    "email": {
+                        "type": "keyword"
+                    },
+                    "roles": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    }
+                }
+            },
+            "newvalue": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "oldvalue": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "owner": {
+                "properties": {
+                    "id": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "package": {
+                "properties": {
+                    "action": {
+                        "type": "keyword"
+                    },
+                    "detection": {
+                        "type": "keyword"
+                    },
+                    "detection_mode": {
+                        "type": "keyword"
+                    },
+                    "sensitivity": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "page_rule": {
+                "properties": {
+                    "apps": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "browser_cache_ttl": {
+                        "properties": {
+                            "current": {
+                                "type": "long"
+                            },
+                            "previous": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "browser_integrity_check": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "cache_level": {
+                        "properties": {
+                            "current": {
+                                "type": "keyword"
+                            },
+                            "previous": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "forward_status": {
+                        "properties": {
+                            "current": {
+                                "type": "long"
+                            },
+                            "previous": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "forward_url": {
+                        "properties": {
+                            "current": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "previous": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "match_pattern": {
+                        "properties": {
+                            "current": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "previous": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "mirage": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "origin_error_pass_thru": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "performance": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "polish": {
+                        "properties": {
+                            "current": {
+                                "type": "keyword"
+                            },
+                            "previous": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "priority": {
+                        "properties": {
+                            "current": {
+                                "type": "long"
+                            },
+                            "previous": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "query_string_sort": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "rocket_loader": {
+                        "properties": {
+                            "current": {
+                                "type": "keyword"
+                            },
+                            "previous": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "security": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "security_level": {
+                        "properties": {
+                            "current": {
+                                "type": "keyword"
+                            },
+                            "previous": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "status": {
+                        "properties": {
+                            "current": {
+                                "type": "keyword"
+                            },
+                            "previous": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "waf": {
+                        "properties": {
+                            "current": {
+                                "type": "boolean"
+                            },
+                            "previous": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            },
+            "path": {
+                "type": "keyword"
+            },
+            "resource": {
+                "properties": {
+                    "id": {
+                        "type": "keyword"
+                    },
+                    "type": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    }
+                }
+            },
+            "rule": {
+                "properties": {
+                    "action": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "created_on": {
+                        "type": "date"
+                    },
+                    "description": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "expression": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "modified_on": {
+                        "type": "date"
+                    },
+                    "priority": {
+                        "type": "long"
+                    }
+                }
+            },
+            "setting": {
+                "properties": {
+                    "name": {
+                        "type": "keyword"
+                    },
+                    "type": {
+                        "type": "keyword"
+                    },
+                    "value": {
+                        "properties": {
+                            "current": {
+                                "type": "keyword"
+                            },
+                            "auto_minify": {
+                                "properties": {
+                                    "css": {
+                                        "properties": {
+                                            "current": {
+                                                "type": "boolean"
+                                            },
+                                            "previous": {
+                                                "type": "boolean"
+                                            }
+                                        }
+                                    },
+                                    "html": {
+                                        "properties": {
+                                            "current": {
+                                                "type": "boolean"
+                                            },
+                                            "previous": {
+                                                "type": "boolean"
+                                            }
+                                        }
+                                    },
+                                    "js": {
+                                        "properties": {
+                                            "current": {
+                                                "type": "boolean"
+                                            },
+                                            "previous": {
+                                                "type": "boolean"
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "mobile_redirect": {
+                                "properties": {
+                                    "enabled": {
+                                        "properties": {
+                                            "current": {
+                                                "type": "boolean"
+                                            },
+                                            "previous": {
+                                                "type": "boolean"
+                                            }
+                                        }
+                                    },
+                                    "path": {
+                                        "properties": {
+                                            "current": {
+                                                "type": "keyword"
+                                            },
+                                            "previous": {
+                                                "type": "keyword"
+                                            }
+                                        }
+                                    },
+                                    "subdomain": {
+                                        "properties": {
+                                            "current": {
+                                                "type": "keyword"
+                                            },
+                                            "previous": {
+                                                "type": "keyword"
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "previous": {
+                                "type": "keyword"
+                            }
+                        }
+                    }
+                }
+            },
+            "tags": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "type": {
+                "type": "keyword"
+            },
+            "waf": {
+                "properties": {
+                    "package": {
+                        "type": "keyword"
+                    },
+                    "rule_description": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "rule_group": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "rule_id": {
+                        "type": "keyword"
+                    },
+                    "value": {
+                        "type": "boolean"
+                    }
+                }
+            }
+        }
+    }
+}

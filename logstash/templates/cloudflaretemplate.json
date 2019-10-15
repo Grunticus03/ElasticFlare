@@ -1,0 +1,532 @@
+{
+    "index_patterns": ["cloudflare-*"],
+    "settings": {
+        "index": {
+            "number_of_shards": 1,
+            "number_of_replicas": 0,
+            "lifecycle.name": "Default"
+        }
+    },
+    "mappings": {
+        "properties": {
+            "@timestamp": {
+                "type": "date"
+            },
+            "@version": {
+                "type": "keyword"
+            },
+            "cache": {
+                "properties": {
+                    "response": {
+                        "properties": {
+                            "bytes": {
+                                "type": "long"
+                            },
+                            "status": {
+                                "type": "long"
+                            },
+                            "status_description": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "status": {
+                        "type": "keyword"
+                    },
+                    "tiered_fill": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "client": {
+                "properties": {
+                    "asn": {
+                        "type": "long"
+                    },
+                    "country": {
+                        "type": "keyword"
+                    },
+                    "device_type": {
+                        "type": "keyword"
+                    },
+                    "ip": {
+                        "type": "ip",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "ip_class": {
+                        "type": "keyword"
+                    },
+                    "location": {
+                        "properties": {
+                            "city": {
+                                "type": "keyword"
+                            },
+                            "coordinates": {
+                                "type": "geo_point",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "country": {
+                                "type": "keyword"
+                            },
+                            "country_cf": {
+                                "type": "keyword"
+                            },
+                            "latitude": {
+                                "type": "float"
+                            },
+                            "longitude": {
+                                "type": "float"
+                            },
+                            "timezone": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "request": {
+                        "properties": {
+                            "bytes": {
+                                "type": "long"
+                            },
+                            "host": {
+                                "type": "keyword"
+                            },
+                            "method": {
+                                "type": "keyword"
+                            },
+                            "path": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "protocol": {
+                                "type": "keyword"
+                            },
+                            "query": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "referer": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "uri": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "user_agent": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "ssl": {
+                        "properties": {
+                            "cipher": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "cipher_grade": {
+                                "type": "keyword"
+                            },
+                            "protocol": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "src_port": {
+                        "type": "long"
+                    },
+                    "user_agent": {
+                        "properties": {
+                            "build": {
+                                "type": "keyword"
+                            },
+                            "device": {
+                                "type": "keyword"
+                            },
+                            "major": {
+                                "type": "keyword"
+                            },
+                            "minor": {
+                                "type": "keyword"
+                            },
+                            "name": {
+                                "type": "keyword"
+                            },
+                            "os": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "os_name": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "header": {
+                        "properties": {
+                            "x-requested-with": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "domain": {
+                "type": "keyword"
+            },
+            "edge": {
+                "properties": {
+                    "colo_id": {
+                        "type": "long"
+                    },
+                    "firewall": {
+                        "properties": {
+                            "rule": {
+                                "properties": {
+                                    "action": {
+                                        "type": "keyword"
+                                    },
+                                    "description": {
+                                        "type": "text",
+                                        "fields": {
+                                            "keyword": {
+                                                "type": "keyword"
+                                            }
+                                        }
+                                    },
+                                    "filter": {
+                                        "type": "text",
+                                        "fields": {
+                                            "keyword": {
+                                                "type": "keyword"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "timestamp_end": {
+                        "type": "date",
+                        "format": "epoch_second"
+                    },
+                    "pathing": {
+                        "properties": {
+                            "op": {
+                                "type": "keyword"
+                            },
+                            "op_description": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "src": {
+                                "type": "keyword"
+                            },
+                            "src_description": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "status": {
+                                "type": "keyword"
+                            },
+                            "status_description": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "ratelimit_action": {
+                        "type": "keyword"
+                    },
+                    "ratelimit_id": {
+                        "type": "long"
+                    },
+                    "request_host": {
+                        "type": "keyword"
+                    },
+                    "response": {
+                        "properties": {
+                            "bytes": {
+                                "type": "long"
+                            },
+                            "compression_ratio": {
+                                "type": "float"
+                            },
+                            "content_type": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "status": {
+                                "type": "long"
+                            },
+                            "status_description": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "server_ip": {
+                        "type": "ip",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "timestamp_start": {
+                        "type": "date",
+                        "format": "epoch_second"
+                    }
+                }
+            },
+            "firewall": {
+                "properties": {
+                    "matches": {
+                        "properties": {
+                            "actions": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "rule_ids": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            },
+                            "sources": {
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "full_url": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "origin": {
+                "properties": {
+                    "ip": {
+                        "type": "ip",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "response": {
+                        "properties": {
+                            "bytes": {
+                                "type": "long"
+                            },
+                            "http_expires": {
+                                "type": "date"
+                            },
+                            "http_last_modified": {
+                                "type": "date"
+                            },
+                            "status": {
+                                "type": "long"
+                            },
+                            "status_description": {
+                                "type": "keyword"
+                            },
+                            "time": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "ssl_protocol": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    }
+                }
+            },
+            "parent_ray_id": {
+                "type": "keyword"
+            },
+            "ray_id": {
+                "type": "keyword"
+            },
+            "security_level": {
+                "type": "keyword"
+            },
+            "waf": {
+                "properties": {
+                    "action": {
+                        "type": "keyword"
+                    },
+                    "flags": {
+                        "type": "long"
+                    },
+                    "matched_variable": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "profile": {
+                        "type": "keyword"
+                    },
+                    "rule_id": {
+                        "type": "keyword"
+                    },
+                    "rule_message": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    }
+                }
+            },
+            "worker": {
+                "properties": {
+                    "cpu_time": {
+                        "type": "long"
+                    },
+                    "status": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword"
+                            }
+                        }
+                    },
+                    "subrequest": {
+                        "type": "boolean"
+                    },
+                    "subrequest_count": {
+                        "type": "long"
+                    }
+                }
+            },
+            "zone_id": {
+                "type": "long"
+            },
+            "blocked": {
+                "type": "boolean"
+            },
+            "blocked_reason": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "host": {
+                "type": "keyword"
+            },
+            "message": {
+                "type": "text"
+            },
+            "path": {
+                "type": "keyword"
+            },
+            "tags": {
+                "type": "text",
+                "fields": {
+                    "keyword": {
+                        "type": "keyword"
+                    }
+                }
+            },
+            "type": {
+                "type": "keyword"
+            }
+        }
+    }
+}
