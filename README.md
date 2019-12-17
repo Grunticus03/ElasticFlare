@@ -12,7 +12,7 @@ ElasticFlare pulls CloudFlare firewall and audit logs, then ingests and enriches
 
 I recommend configuring two scheduled tasks in Windows to execute the scripts on a set schedule.  See the [CloudFlare ELS API documentation](https://api.cloudflare.com) for additional support and limitations.
 
-**Built and tested on Elastic Stack 7.2.0.**
+**Built on Elastic Stack 7.2.0.  Verified functional up to 7.5.0**
 
 Feedback and requests for additional features or enrichments is always welcome.
 
