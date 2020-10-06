@@ -1,8 +1,15 @@
 input {
+  # Uncomment the below to have Logstash execute the log collection PowerShell script
+  # The schedule is configured to run every five minutes
+  # I prefer to leave it outside the pipeline in case Logstash crashes
+  # exec {
+    # command => 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NonInteractive -WindowStyle Hidden -command ". D:\Logstash\scripts\CFLogPull.ps1"'
+    # schedule => "*/5 * * * *"
+  # }
   file {
   #Enterprise logs
     id => "ELS Logs"
-    path => "/Ingest/CloudFlare/*.txt"
+    path => "d:/Ingest/CloudFlare/*.txt"
     stat_interval => 2
     start_position => "beginning"
     close_older => 300
@@ -11,12 +18,22 @@ input {
   file {
   #Organization audit logs
     id => "Audit Logs"
-    path => "/Ingest/CloudFlare/*.log"
+    path => "d:/Ingest/CloudFlare/*.log"
     mode => "read"
     stat_interval => 2
     start_position => "beginning"
     close_older => 300
     type => "audit"
+  }
+  file {
+  #Reingest Pipeline
+    id => "ELS Reingest"
+    path => "d:/Ingest/CloudFlareReingest/*.txt"
+    mode => "read"
+    stat_interval => 2
+    start_position => "beginning"
+    close_older => 300
+    type => "activity"
   }
 }
 filter {
@@ -35,8 +52,10 @@ filter {
     id => "Field Parse"
     source => "message"
   }
+  #Begin parsing audit logs
   if [type] == "audit" {
     mutate {
+      id => "Audit Field Standardize"
       rename => {
         "[id]" => "[change][id]"
         "[interface]" => "[change][interface]"
@@ -52,30 +71,30 @@ filter {
         "[action][type]" => "[change][activity]"
         "[metadata][cf-ray]" => "[change][ray_id]"
       }
-      #Use the following gsub to remove the domain from the actor name.  Change 'example' to your mail domain.
-      gsub => [
-      "[change][actor]", "\@example\.com|\@example\.net", ""
-      ]
     }
     mutate {
+      id => "Audit Field Stripping"
       gsub => [
+        "[change][actor]", "\@.*\..*", "",
         "[change][date]", "T|t", " ",
         "[change][date]", "z|\..{1,6}", ""
       ]
     }
     date {
+      id => "Audit Timestamp Formatting"
       match => [ "[change][date]", "yyyy-MM-dd HH:mm:ss" ]
       timezone => "Etc/UTC"
     }
-    #After running CFDictionaries script, change dictionary_path to location of file output.
     translate {
+      id => "Audit Zone ID Translation"
       field => "[change][zone]"
       destination => "[change][zone_id]"
-      dictionary_path => "/dictionaries/cloudflareauditzones.yaml"
+      dictionary_path => "D:/Logstash/dictionaries/CloudFlare/cloudflareauditzones.yaml"
       refresh_behaviour => "replace"
     }
     if [resource][type] == "dns_record" {
       mutate {
+        id => "DNS Resource Field Standardize"
         rename => {
           "[metadata][content]" => "[dns][content][current]"
           "[metadata][name]" => "[dns][name][current]"
@@ -90,36 +109,100 @@ filter {
           "[metadata][type]" => "[dns][type]"
         }
       }
-      #Add CloudFlare API Key and Login Email to header settings below
       if [change][activity] == "rec_add" {
-        http {
-          headers => {
-            "X-Auth-Key" => "Cloudflare API Key"
-            "X-Auth-Email" => "Cloudflare Login Email Address"
-          }
-          body_format => "json"
-          url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/dns_records/%{[resource][id]}"
+        translate {
+          id => "Translate DNS Content"
+          field => "[resource][id]"
+          destination => "[dns][content][current]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/content.yaml"
+          refresh_behaviour => "replace"
+          override => true
         }
-        mutate {
-          rename => {
-            "[body][result][content]" => "[dns][content][current]"
-            "[body][result][created_on]" => "[dns][created_on]"
-            "[body][result][modified_on]" => "[dns][modified_on]"
-            "[body][result][name]" => "[dns][name][current]"
-            "[body][result][proxiable]" => "[dns][proxiable][current]"
-            "[body][result][proxied]" => "[dns][proxied][current]"
-            "[body][result][ttl]" => "[dns][ttl][current]"
-            "[body][result][type]" => "[dns][type]"
-          }
+        translate {
+          id => "Translate DNS Created On"
+          field => "[resource][id]"
+          destination => "[dns][created_on]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/created_on.yaml"
+          refresh_behaviour => "replace"
+          override => true
         }
-        if "_httprequestfailure" in [tags] {
-          mutate {
-            remove_tag => [ "_httprequestfailure" ]
-            add_tag => [ "record_deleted" ]
-          }
+        translate {
+          id => "Translate DNS Modified"
+          field => "[resource][id]"
+          destination => "[dns][modified_on]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/modified_on.yaml"
+          refresh_behaviour => "replace"
+          override => true
         }
+        translate {
+          id => "Translate DNS Name"
+          field => "[resource][id]"
+          destination => "[dns][name][current]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/name.yaml"
+          refresh_behaviour => "replace"
+          override => true
+        }
+        translate {
+          id => "Translate DNS Proxiable"
+          field => "[resource][id]"
+          destination => "[dns][proxiable][current]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/proxiable.yaml"
+          refresh_behaviour => "replace"
+          override => true
+        }
+        translate {
+          id => "Translate DNS Proxied"
+          field => "[resource][id]"
+          destination => "[dns][proxied][current]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/proxied.yaml"
+          refresh_behaviour => "replace"
+          override => true
+        }
+        translate {
+          id => "Translate DNS TTL"
+          field => "[resource][id]"
+          destination => "[dns][ttl][current]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/ttl.yaml"
+          refresh_behaviour => "replace"
+          override => true
+        }
+        translate {
+          id => "Translate DNS Type"
+          field => "[resource][id]"
+          destination => "[dns][type][current]"
+          dictionary_path => "D:/Logstash/dictionaries/CloudFlare/dns/type.yaml"
+          refresh_behaviour => "replace"
+          override => true
+        }
+        # http {
+          # headers => {
+            # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+            # "X-Auth-Email" => "wwalker@stlouisco.com"
+          # }
+          # body_format => "json"
+          # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/dns_records/%{[resource][id]}"
+        # }
+        # mutate {
+          # rename => {
+            # "[body][result][content]" => "[dns][content][current]"
+            # "[body][result][created_on]" => "[dns][created_on]"
+            # "[body][result][modified_on]" => "[dns][modified_on]"
+            # "[body][result][name]" => "[dns][name][current]"
+            # "[body][result][proxiable]" => "[dns][proxiable][current]"
+            # "[body][result][proxied]" => "[dns][proxied][current]"
+            # "[body][result][ttl]" => "[dns][ttl][current]"
+            # "[body][result][type]" => "[dns][type]"
+          # }
+        # }
+        # if "_httprequestfailure" in [tags] {
+          # mutate {
+            # remove_tag => [ "_httprequestfailure" ]
+            # add_tag => [ "record_deleted" ]
+          # }
+        # }
       }
       translate {
+        id => "Translate DNS Activities" 
         field => "[change][activity]"
         destination => "[change][activity]"
         dictionary => {
@@ -131,27 +214,83 @@ filter {
         override => true
       }
     }
-    #Add CloudFlare API Key and Login Email to header settings below
     if [resource][type] == "firewallrules" {
-      http {
-        headers => {
-            "X-Auth-Key" => "Cloudflare API Key"
-            "X-Auth-Email" => "Cloudflare Login Email Address"
-        }
-        url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/rules/%{[resource][id]}"
-      }
-      mutate {
-        rename => {
-          "[body][result][action]" => "[rule][action]"
-          "[body][result][created_on]" => "[rule][created_on]"
-          "[body][result][description]" => "[rule][description]"
-          "[body][result][filter][expression]" => "[rule][expression]"
-          "[body][result][paused]" => "[rule][enabled]"
-          "[body][result][modified_on]" => "[rule][modified_on]"
-          "[body][result][priority]" => "[rule][priority]"
-        }
+      translate {
+        id => "Translate Firewall Rule Action"
+        field => "[resource][id]"
+        destination => "[rule][action]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/action.yaml"
+        refresh_behaviour => "replace"
+        override => true
       }
       translate {
+        id => "Translate Firewall Rule Created"
+        field => "[resource][id]"
+        destination => "[rule][created_on]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/created.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate Firewall Rule Description"
+        field => "[resource][id]"
+        destination => "[rule][description]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/description.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate Firewall Rule Expression"
+        field => "[resource][id]"
+        destination => "[rule][expression]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/expression.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate Firewall Rule Paused"
+        field => "[resource][id]"
+        destination => "[rule][enabled]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/paused.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate Firewall Rule Modified"
+        field => "[resource][id]"
+        destination => "[rule][modified_on]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/modified.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate Firewall Rule Priority"
+        field => "[resource][id]"
+        destination => "[rule][priority]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/priority.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      # http {
+        # headers => {
+          # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+          # "X-Auth-Email" => "wwalker@stlouisco.com"
+        # }
+        # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/rules/%{[resource][id]}"
+      # }
+      # mutate {
+        # rename => {
+          # "[body][result][action]" => "[rule][action]"
+          # "[body][result][created_on]" => "[rule][created_on]"
+          # "[body][result][description]" => "[rule][description]"
+          # "[body][result][filter][expression]" => "[rule][expression]"
+          # "[body][result][paused]" => "[rule][enabled]"
+          # "[body][result][modified_on]" => "[rule][modified_on]"
+          # "[body][result][priority]" => "[rule][priority]"
+        # }
+      # }
+      translate {
+        id => "Translate Firewall Rule Enabled to Bool"
         field => "[rule][enabled]"
         destination => "[rule][enabled]"
         dictionary => {
@@ -162,6 +301,7 @@ filter {
         override => true
       }
       translate {
+        id => "Translate Firewall Rule Actions"
         field => "[change][activity]"
         destination => "[change][activity]"
         dictionary => {
@@ -173,22 +313,38 @@ filter {
         override => true
       }
     }
-    #Add CloudFlare API Key and Login Email to header settings below
     if [resource][type] == "filter" {
-      http {
-        headers => {
-            "X-Auth-Key" => "Cloudflare API Key"
-            "X-Auth-Email" => "Cloudflare Login Email Address"
-        }
-        url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/filters/%{[resource][id]}"
-      }
-      mutate {
-        rename => {
-        "[body][result][expression]" => "[filter][expression]"
-        "[body][result][paused]" => "[filter][enabled]"
-        }
+      translate {
+        id => "Translate Filter Expression"
+        field => "[resource][id]"
+        destination => "[filter][expression]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/expression.yaml"
+        refresh_behaviour => "replace"
+        override => true
       }
       translate {
+        id => "Translate Filter Paused"
+        field => "[resource][id]"
+        destination => "[filter][enabled]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/paused.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      # http {
+        # headers => {
+          # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+          # "X-Auth-Email" => "wwalker@stlouisco.com"
+        # }
+        # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/filters/%{[resource][id]}"
+      # }
+      # mutate {
+        # rename => {
+        # "[body][result][expression]" => "[filter][expression]"
+        # "[body][result][paused]" => "[filter][enabled]"
+        # }
+      # }
+      translate {
+        id => "Translate Filter Enabled To Bool"
         field => "[filter][enabled]"
         destination => "[filter][enabled]"
         dictionary => {
@@ -202,6 +358,7 @@ filter {
     if [resource][type] == "account" {
       if [change][activity] == "add_member" or [change][activity] == "accept_member" or [change][activity] == "expire_member" or [change][activity] == "remove_member" or [change][activity] == "set_member_roles" {
         mutate {
+          id => "New User Field Standardize 1"
           rename => {
           "[metadata][account_name]" => "[new_user][account]"
           "[metadata][user_email]" => "[new_user][email]"
@@ -212,6 +369,7 @@ filter {
       }
       if [change][activity] == "mfa_enabled" or [change][activity] == "mfa_disabled" {
         mutate {
+          id => "MFA Field Standardize"
           rename => {
             "[metadata][mfa_type]" => "[mfa][type]"
             "[metadata][acted_on_behalf_of]" => "[change][actor]"
@@ -221,6 +379,7 @@ filter {
           }
         }
         mutate {
+          id => "MFA Field Stripping"
           gsub => [
             "[mfa][state]", ".*(?!\w*$) ", ""
           ]
@@ -228,6 +387,7 @@ filter {
       }
       if [change][activity] == "logout" {
         mutate {
+          id => "Logout Field Standardize"
           rename => {
             "[metadata][acted_on_behalf_of]" => "[change][actor]"
           }
@@ -235,6 +395,7 @@ filter {
       }
       if [change][activity] == "delete" {
         mutate {
+          id => "DNS Delete Field Standardize"
           rename => {
             "[metadata][content]" => "[dns][content][current]"
             "[metadata][name]" => "[dns][name][current]"
@@ -247,67 +408,65 @@ filter {
     }
     if [resource][type] == "zone" {
       if [change][activity] == "toggle_waf_set" {
-        if [metadata][pack] == "cloudflare" {
-          #Add CloudFlare API Key and Email address to header below
-          http {
-            body_format => "json"
-            headers => {
-              "X-Auth-Key" => "Cloudflare API Key"
-              "X-Auth-Email" => "Cloudflare Login Email Address"
-            }
-            url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=CloudFlare"
-          }
-          mutate {
-            add_field => {
-              "[package][detection]" => "%{[body][result]}"
-            }
-          }
-        }
-        #Add CloudFlare API Key and Email address to header below
-        else if [metadata][pack] == "owasp" {
-          http {
-            body_format => "json"
-            headers => {
-              "X-Auth-Key" => "Cloudflare API Key"
-              "X-Auth-Email" => "Cloudflare Login Email Address"
-            }
-            url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=OWASP%20ModSecurity%20Core%20Rule%20Set"
-          }
-          mutate {
-            add_field => {
-              "[package][detection]" => "%{[body][result]}"
-              "[package][action]" => "%{[body][result]}"
-              "[package][sensitivity]" => "%{[body][result]}"
-            }
-          }
-        }
-        #Add CloudFlare API Key and Email address to header below
-        else if [metadata][pack] == "internal" {
-          http {
-            body_format => "json"
-            headers => {
-              "X-Auth-Key" => "Cloudflare API Key"
-              "X-Auth-Email" => "Cloudflare Login Email Address"
-            }
-            url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=USER"
-          }
-          mutate {
-            add_field => {
-              "[package][detection]" => "%{[body][result]}"
-            }
-          }
-        }
+        # if [metadata][pack] == "cloudflare" {
+          # http {
+            # body_format => "json"
+            # headers => {
+              # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+              # "X-Auth-Email" => "wwalker@stlouisco.com"
+            # }
+            # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=CloudFlare"
+          # }
+          # mutate {
+            # add_field => {
+              # "[package][detection]" => "%{[body][result]}"
+            # }
+          # }
+        # }
+        # else if [metadata][pack] == "owasp" {
+          # http {
+            # body_format => "json"
+            # headers => {
+              # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+              # "X-Auth-Email" => "wwalker@stlouisco.com"
+            # }
+            # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=OWASP%20ModSecurity%20Core%20Rule%20Set"
+          # }
+          # mutate {
+            # add_field => {
+              # "[package][detection]" => "%{[body][result]}"
+              # "[package][action]" => "%{[body][result]}"
+              # "[package][sensitivity]" => "%{[body][result]}"
+            # }
+          # }
+        # }
+        # else if [metadata][pack] == "internal" {
+          # http {
+            # body_format => "json"
+            # headers => {
+              # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+              # "X-Auth-Email" => "wwalker@stlouisco.com"
+            # }
+            # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/firewall/waf/packages?name=USER"
+          # }
+          # mutate {
+            # add_field => {
+              # "[package][detection]" => "%{[body][result]}"
+            # }
+          # }
+        # }
+        # mutate {
+          # gsub => [
+            # "[package][detection]", ".*(?=detection_mode=\w*)|, name.*", "",
+            # "[package][action]", ".*(?=action_mode=\w*)", "",
+            # "[package][sensitivity]", ".*(?=sensitivity=\w*)", "",
+            # "[package][detection]", "detection_mode=", "",
+            # "[package][action]", "action_mode=|\}", "",
+            # "[package][sensitivity]", "sensitivity=|,.*", ""
+          # ]
+        # }
         mutate {
-          gsub => [
-            "[package][detection]", ".*(?=detection_mode=\w*)|, name.*", "",
-            "[package][action]", ".*(?=action_mode=\w*)", "",
-            "[package][sensitivity]", ".*(?=sensitivity=\w*)", "",
-            "[package][detection]", "detection_mode=", "",
-            "[package][action]", "action_mode=|\}", "",
-            "[package][sensitivity]", "sensitivity=|,.*", ""
-          ]
-        }
-        mutate {
+          id => "WAF Package Field Standardize"
           rename => {
             "[metadata][pack]" => "[waf][package]"
             "[metadata][set]" => "[waf][rule_group]"
@@ -319,6 +478,7 @@ filter {
       }
       if [change][activity] == "toggle_waf_rule" {
         mutate {
+          id => "WAF Rule Field Standardize"
           rename => {
             "[metadata][pack]" => "[waf][package]"
             "[metadata][set]" => "[waf][rule_group]"
@@ -331,6 +491,7 @@ filter {
       if [change][activity] == "change_setting" {
         if [metadata][name] == "auto_minify" {
           mutate {
+            id => "Auto-Minify Field Standardize"
             rename => {
               "[metadata][old_value][css]" => "[setting][auto_minify][previous][css]"
               "[metadata][old_value][html]" => "[setting][auto_minify][previous][html]"
@@ -345,6 +506,7 @@ filter {
         }
         else if [metadata][name] == "mobile_redirect" {
           mutate {
+            id => "Mobile Field Standardize"
             rename => {
               "[metadata][old_value][enabled]" => "[setting][mobile_redirect][previous][enabled]"
               "[metadata][old_value][path]" => "[setting][mobile_redirect][previous][path]"
@@ -358,6 +520,7 @@ filter {
           }
         } else {
           mutate {
+            id => "Settings Field Standardize"
             rename => {
               "[metadata][name]" => "[setting][name]"
               "[metadata][type]" => "[setting][type]"
@@ -370,35 +533,37 @@ filter {
       }
       if [change][activity] == "zone_reset_check" {
         mutate {
+          id => "Zone Reset Modifications 1"
           add_field => {
             "[change][zone]" => "%{[change][info]}"
           }
         }
         mutate {
+          id => "Zone Reset Modifications 2"
           gsub => [
             "[change][zone]", "^\w*\(.*\) ", ""
           ]
         }
       }
-      #Add CloudFlare API Key and Email Address to header below
-      if [change][activity] == "set_min_tls_version" {
-        http {
-          body_format => "json"
-          headers => {
-            "X-Auth-Key" => "Cloudflare API Key"
-            "X-Auth-Email" => "Cloudflare Login Email Address"
-          }
-          url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/settings/min_tls_version"
-        }
-        mutate {
-          rename => {
-            "[body][result][value]" => "[min_tls]"
-          }
-        }
-      }
+      # if [change][activity] == "set_min_tls_version" {
+        # http {
+          # body_format => "json"
+          # headers => {
+            # "X-Auth-Key" => "56f96fce59d1967e452a7a1234705ad6d886c"
+            # "X-Auth-Email" => "wwalker@stlouisco.com"
+          # }
+          # url => "https://api.cloudflare.com/client/v4/zones/%{[change][zone_id]}/settings/min_tls_version"
+        # }
+        # mutate {
+          # rename => {
+            # "[body][result][value]" => "[min_tls]"
+          # }
+        # }
+      # }
     }
     if [resource][type] == "pagerule" {
       mutate {
+        id => "Page Rule Field Standardize"
         rename => {
           "[metadata][pr_behavior][apps]" => "[page_rule][apps][current]"
           "[metadata][pr_behavior][browser_cache_ttl]" => "[page_rule][browser_cache_ttl][current]"
@@ -446,6 +611,7 @@ filter {
     if [resource][type] == "user" {
       if [change][activity] == "join_org" {
         mutate {
+          id => "New User Field Standardize 2"
           rename => {
             "[metadata][account_name]" => "[new_user][account]"
             "[metadata][user_email]" => "[new_user][email]"
@@ -454,6 +620,7 @@ filter {
       }
     }
     mutate {
+      id => "Field Removal"
       lowercase => [
         "[dns][type]"
       ]
@@ -464,8 +631,9 @@ filter {
       ]
     }
   }
+  #Begin parsing activity logs
   else if [type] == "activity" {
-    #The following IF/ELSE statement creates the 'full_url' field by combining clientrequesthost and clientrequesturi fields.  If you don't see a need for it, you are safe to remove it.
+    #The following IF/ELSE statement creates the 'full_url' field.
     if [clientsslprotocol] == "none" {
       mutate {
         id => "Full URL - HTTP"
@@ -485,26 +653,60 @@ filter {
     geoip {
       id => "ClientIP Geo"
       source => "clientip"
-      fields => [city_name,country_name,latitude,longitude,timezone ]
+      fields => [city_name,country_name,latitude,longitude,timezone]
       target => "[client][location]"
       add_field => {
         "[client][location][coordinates]" => "%{[client][location][latitude]}, %{[client][location][longitude]}"
       }
     }
+    if [edgeserverip] {
+      geoip {
+        id => "EdgeServerIP Geo"
+        source => "edgeserverip"
+        fields => [city_name,latitude,longitude]
+        target => "[edge][location]"
+        add_field => {
+          "[edge][location][coordinates]" => "%{[edge][location][latitude]}, %{[edge][location][longitude]}"
+        }
+      }
+    }
+    if [originip] {
+      geoip {
+        id => "Origin IP Geo"
+        source => "originip"
+        fields => [city_name,latitude,longitude]
+        target => "[origin][location]"
+        add_field => {
+          "[origin][location][coordinates]" => "%{[origin][location][latitude]}, %{[origin][location][longitude]}"
+        }
+      }
+    }
+    if [originip] == "" {
+      mutate {
+        id => "Remove Blank Origin IP"
+        remove_field => [ "originip" ]
+      }
+    }
+    if [edgeserverip] == "" {
+      mutate {
+        id => "Remove Blank Edge IP"
+        remove_field => [ "edgeserverip" ]
+      }
+    }
     #Parse the data in clientrequestuseragent field.
-    #Change regexes path to location of uaregexes file.
     useragent {
       id => "User Agent Parse"
       source => "clientrequestuseragent"
       target => "[client][user_agent]"
-      regexes => "\dictionaries\uaregexes.yaml"
+      regexes => "D:\Logstash\dictionaries\uaregexes.yaml"
     }
     #General field modifications
     mutate {
       id => "Field Mod. Stage 1"
       gsub => [
         "originresponsehttpexpires", " ...$|^..., ", "",
-        "originresponsehttplastmodified", " ...$|^..., ", ""
+        "originresponsehttplastmodified", " ...$|^..., ", "",
+        "clientrequesthost", ':\d+', ''
       ]
       add_field => {
         "domain" => "%{clientrequesthost}"
@@ -520,26 +722,23 @@ filter {
         "wafprofile", "unknown", "none"
       ]
     }
-    #Set dictionary_path to correct filepath
     translate {
       id => "CacheResponse Translate"
-      dictionary_path => "dictionaries/httpstatuscodes.yaml"
+      dictionary_path => "D:/Logstash/dictionaries/httpstatuscodes.yaml"
       field => "cacheresponsestatus"
       destination => "cacheresponsestatusdescription"
       refresh_behaviour => "replace"
     }
-    #Set dictionary_path to correct filepath
     translate {
       id => "EdgeResponse Translate"
-      dictionary_path => "dictionaries/httpstatuscodes.yaml"
+      dictionary_path => "D:/Logstash/dictionaries/httpstatuscodes.yaml"
       field => "edgeresponsestatus"
       destination => "edgeresponsestatusdescription"
       refresh_behaviour => "replace"
     }
-    #Set dictionary_path to correct filepath
     translate {
       id => "OriginResponse Translate"
-      dictionary_path => "dictionaries/httpstatuscodes.yaml"
+      dictionary_path => "D:/Logstash/dictionaries/httpstatuscodes.yaml"
       field => "originresponsestatus"
       destination => "originresponsestatusdescription"
       refresh_behaviour => "replace"
@@ -662,22 +861,58 @@ filter {
         "hi" => "high"
       }
     }
-    #Set dictionary_path to correct filepath
     translate {
+      id => "ELS Zone ID Lookup"
       field => "[domain]"
       destination => "[zone-id]"
-      dictionary_path => "/dictionaries/cloudflareauditzones.yaml"
+      dictionary_path => "D:/Logstash/dictionaries/CloudFlare/auditzones.yaml"
       refresh_behaviour => "replace"
     }
-    #Set CloudFlare API Key and Email address in header below
     if "firewallrules" in [firewallmatchessources] {
-      http {
-        headers => {
-            "X-Auth-Key" => "Cloudflare API Key"
-            "X-Auth-Email" => "Cloudflare Login Email Address"
+      mutate {
+        id => "Firewall Field Creation"
+        add_field => {
+          "[edge][firewall][rule][action]" => "%{firewallmatchesruleids}"
+          "[edge][firewall][rule][description]" => "%{firewallmatchesruleids}"
+          "[edge][firewall][rule][filter]" => "%{firewallmatchesruleids}"
         }
-        body_format => "json"
-        url => "https://api.cloudflare.com/client/v4/zones/%{[zone-id]}/firewall/rules/%{[firewallmatchesruleids]}"
+      }
+      mutate {
+        id => "Firewall Field Conversion"
+        convert => {
+          "[edge][firewall][rule][action]" => "string"
+          "[edge][firewall][rule][description]" => "string"
+          "[edge][firewall][rule][filter]" => "string"
+        }
+        gsub => [
+          "[edge][firewall][rule][action]", ",.*", "",
+          "[edge][firewall][rule][description]", ",.*", "",
+          "[edge][firewall][rule][filter]", ",.*", ""
+        ]
+      }
+      translate {
+        id => "Translate ELS Firewall Action"
+        field => "[edge][firewall][rule][action]"
+        destination => "[edge][firewall][rule][action]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/action.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate ELS Firewall Description"
+        field => "[edge][firewall][rule][description]"
+        destination => "[edge][firewall][rule][description]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/description.yaml"
+        refresh_behaviour => "replace"
+        override => true
+      }
+      translate {
+        id => "Translate ELS Firewall Expression"
+        field => "[edge][firewall][rule][filter]"
+        destination => "[edge][firewall][rule][filter]"
+        dictionary_path => "D:/Logstash/dictionaries/CloudFlare/fw/expression.yaml"
+        refresh_behaviour => "replace"
+        override => true
       }
     }
     if "ban" in [edgepathingop] or "chl" in [edgepathingop] or "bad visitor" in [edgepathingop] or "drop" in [wafaction] or "challenge allow" in [wafaction] {
@@ -719,18 +954,6 @@ filter {
         }
       }
     }
-    if [originip] == "" {
-      mutate {
-        id => "Remove Blank Origin IP"
-        remove_field => [ "originip" ]
-      }
-    }
-    if [edgeserverip] == "" {
-      mutate {
-        id => "Remove Blank Edge IP"
-        remove_field => [ "edgeserverip" ]
-      }
-    }
     if [originresponsehttpexpires] == "" {
       mutate {
         id => "Remove Blank HTTP Expires"
@@ -757,23 +980,19 @@ filter {
     }
     if [clientrequesturi] and [clientrequesturi] =~ ".*\?.*" {
       mutate {
+          id => "Client Query Field Creation"
         add_field => {
           "clientrequestquery" => "%{[clientrequesturi]}"
         }
       }
       mutate {
+        id => "Client Query Strip"
         gsub => [
           "clientrequestquery", "^.*\?", ""
         ]
       }
-    }
-    if [clientrequestquery] {
-      mutate {
-        convert => {
-          "clientrequestquery" => "string"
-        }
-      }
       urldecode {
+        id => "Client Query Decode"
         field => "clientrequestquery"
       }
     }
@@ -787,9 +1006,6 @@ filter {
     mutate {
       id => "Restructure To Objects"
       rename => {
-        "[body][result][action]" => "[edge][firewall][rule][action]"
-        "[body][result][description]" => "[edge][firewall][rule][description]"
-        "[body][result][filter][expression]" => "[edge][firewall][rule][filter]"
         "cacheresponsebytes" => "[cache][response][bytes]"
         "cacheresponsestatus" => "[cache][response][status]"
         "cacheresponsestatusdescription" => "[cache][response][status_description]"
@@ -808,6 +1024,8 @@ filter {
         "clientrequestpath" => "[client][request][path]"
         "clientrequestprotocol" => "[client][request][protocol]"
         "clientrequestquery" => "[client][request][query]"
+        "clientrequestqueryterms" => "[client][request][query_terms]"
+        "clientrequestquerydecode" => "[client][request][query_decode]"
         "clientrequestreferer" => "[client][request][referer]"
         "clientrequesturi" => "[client][request][uri]"
         "clientrequestuseragent" => "[client][request][user_agent]"
@@ -818,6 +1036,7 @@ filter {
         "clientxrequestedwith" => "[client][header][x-requested-with]"
         "edgecoloid" => "[edge][colo_id]"
         "edgeendtimestamp" => "[edge][timestamp_end]"
+        "[edge][location][city_name]" => "[edge][location][city]"
         "edgepathingop" => "[edge][pathing][op]"
         "edgepathingopdescription" => "[edge][pathing][op_description]"
         "edgepathingsrc" => "[edge][pathing][src]"
@@ -838,6 +1057,7 @@ filter {
         "firewallmatchesruleids" => "[firewall][matches][rule_ids]"
         "firewallmatchessources" => "[firewall][matches][sources]"
         "originip" => "[origin][ip]"
+        "[origin][location][city_name]" => "[origin][location][city]"
         "originsslprotocol" => "[origin][ssl_protocol]"
         "originresponsebytes" => "[origin][response][bytes]"
         "originresponsehttpexpires" => "[origin][response][http_expires]"
@@ -867,28 +1087,56 @@ filter {
   }
 }
 output {
+  if [waf][action] == "drop" and [waf][rule_message] !~ /anomaly:header:user-agent.*/ and "97.91.237.247" not in [client][ip] {
+    email {
+      id => "Email Notify"
+      to => "wwalker@stlouisco.com, majero@stlouisco.com"
+      from => 'CloudFlareLogs@stlouisco.com'
+      subject => 'CloudFlare Block: %{[client][request][host]}'
+      body => 'The following request was blocked by CloudFlare WAF\n
+        Event Time:  %{[@timestamp]}
+        Host:  %{[client][request][host]}
+        Client IP:  %{[client][ip]}
+        Block Reason:  %{[blocked_reason]}
+        HTTP Method:  %{[client][request][method]}
+        Full URL:  %{[full_url]}'
+      address => 'intrly.stlouisco.net'
+    }
+    # Execute Command Proof of Concept
+    # exec {
+      # #Specify path to executable
+      # command => "D:/Logstash/scripts/EmailNotification_heartbeat_dnnstlouisco.bat"
+      # #quiet => true
+    # }
+  }
   if [type] == "audit" {
     elasticsearch {
       id => "Audit Logs to Elastic"
-      hosts => "192.168.1.1:9200"
+      cacert => "D:/Logstash/7.9.2/config/certs/certbun.pem"
+      user => "elastic"
+      password => "K6m^OsUUoE&E"
+      hosts => "https://ssselklog.stlouisco.net:9200"
       document_id => "%{[change][id]}"
-      template => "/templates/cloudflareaudittemplate.json"
+      template => "D:/Logstash/templates/cloudflareaudittemplate.json"
       template_name => "cloudflareaudit"
       template_overwrite => true
       ilm_rollover_alias => "cloudflareaudit"
       ilm_pattern => "{now/d}-000001"
-      ilm_policy => ""
+      ilm_policy => "Delete_After_1YR"
     }
   } else {
     elasticsearch {
-      id => "Enterprise Logs to Elastics"
-      hosts => "192.168.1.1:9200"
+      id => "Logs to Elastics"
+      cacert => "D:/Logstash/7.9.2/config/certs/certbun.pem"
+      user => "elastic"
+      password => "K6m^OsUUoE&E"
+      hosts => "https://ssselklog.stlouisco.net:9200"
       document_id => "%{[edge][timestamp_start]}%{[ray_id]}"
-      template => "/templates/cloudflaretemplate.json"
+      template => "D:/Logstash/templates/cloudflaretemplate.json"
       template_name => "cloudflare"
       template_overwrite => true
       index => "cloudflare-%{+YYYY.ww}"
-      ilm_policy => ""
+      ilm_policy => "Delete_After_1YR"
     }
   }
 }
