@@ -7,18 +7,25 @@ $SmtpServer = "Hostname/IP of SMTP server"
 $APIKey = "Global API Key"
 $CFEmail = "CloudFlare admin email address for API call"
 $OrgId = "Organization ID for audit log pulls"
+$dictroot = "Root dictionary folder"
 # The following variables specify the timeframe to pull logs. As per the API documentation, https://api.cloudflare.com/#logs-received-logs-received,
 # the ending time ($EM) must be at least 5 minutes prior to now. In addition, the total timeframe cannot exceed 1 hour
 $SM = "Starting time number of minutes to go back - If it's 12:00 and you want logs starting at 11:50, set to 10"
 $EM = "Ending time number of minutes to go back - This must be at least 5 minutes in the past."
 
 #CloudFlare Enterprise Log Service (ELS) Pull
+#Get time 7m - 2m ago (In UTC)
 $D = Get-Date
 $T = (Get-Date ($D) -Format MMddyyy_HHmmss)
 $S = [Math]::Floor([decimal](Get-Date($D).AddMinutes(-$($SM)).ToUniversalTime()-uformat "%s"))
 $E = [Math]::Floor([decimal](Get-Date($D).AddMinutes(-$($EM)).ToUniversalTime()-uformat "%s"))
+$apibase = "https://api.cloudflare.com/client/v4"
+$RetFlagNot = @()
 #Force PowerShell to use TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::TLS12
+
+#Set Required Headers
+#Change GLOBALAPIKEY and USEREMAILADDRESS, retain double quotes.
 $A = @{
   ContentType = 'application/json'
   Method = 'GET'
@@ -27,42 +34,103 @@ $A = @{
       "X-Auth-Email" = $CFEmail
   }
 }
-$apibase = "https://api.cloudflare.com/client/v4"
+
+#Pull Domains
+$zonetable = (Invoke-RestMethod @A "$($apibase)/zones?per_page=500").Result | Where-object {$_.plan.name -eq "Enterprise Website"}
+
+#Build Dictionaries
+foreach ($zone in $zonetable) {
+
+  #Create folder/path to dictionary locations
+  if ((Test-Path "$($dictroot)\dns") -eq $false) {
+    New-Item -Type Directory "$($dictroot)\dns" | Out-Null
+  }
+  if ((Test-Path "$($dictroot)\fw") -eq $false) {
+    New-Item -Type Directory "$($dictroot)\fw" | Out-Null
+  }
+  
+  #Build Zone Table
+  [string[]]$zonelist += '"'+$zone.name+'": '+$zone.id
+  
+  #Build Firewall Rule Dictionaries
+  $rules = (Invoke-RestMethod @A -Uri "$($apibase)/zones/$($zone.id)/firewall/rules").Result
+  foreach ($rule in $rules) {
+    [string[]]$fwdesc += '"'+$rule.id+'": '+$rule.description
+    [string[]]$fwaction += '"'+$rule.id+'": '+$rule.action
+    [string[]]$fwexpression += '"'+$rule.id+'": '+$rule.filter.expression
+    [string[]]$fwcreated += '"'+$rule.id+'": '+$rule.created_on
+    [string[]]$fwmodified += '"'+$rule.id+'": '+$rule.modified_on
+    [string[]]$fwpaused += '"'+$rule.id+'": '+$rule.paused
+    [string[]]$fwpriority += '"'+$rule.id+'": '+$rule.priority
+  }
+  
+  #Build DNS Dictionaries
+  $DNSEntries = (Invoke-RestMethod @A -Uri "$($apibase)/zones/$($zone.id)/dns_records").Result
+  foreach ($DNSEntry in $DNSEntries) {
+    [string[]]$DNSContent += '"'+$DNSEntry.id+'": '+$DNSEntry.content
+    [string[]]$DNSCreatedOn += '"'+$DNSEntry.id+'": '+$DNSEntry.created_on
+    [string[]]$DNSModifiedOn += '"'+$DNSEntry.id+'": '+$DNSEntry.ModifiedOn
+    [string[]]$DNSName += '"'+$DNSEntry.id+'": '+$DNSEntry.Name
+    [string[]]$DNSProxiable += '"'+$DNSEntry.id+'": '+$DNSEntry.Proxiable
+    [string[]]$DNSProxied += '"'+$DNSEntry.id+'": '+$DNSEntry.Proxied
+    [string[]]$DNSTTL += '"'+$DNSEntry.id+'": '+$DNSEntry.TTL
+    [string[]]$DNSType += '"'+$DNSEntry.id+'": '+$DNSEntry.Type
+  }
+}
+
+#Save Dictionaries To Disk
+#Firewall Dictionaries
+$fwdesc | Out-File "$($dictroot)\fw\description.yaml" -Encoding utf8
+$fwaction | Out-File "$($dictroot)\fw\action.yaml" -Encoding utf8
+$fwexpression | Out-File "$($dictroot)\fw\expression.yaml" -Encoding utf8
+$fwcreated | Out-File "$($dictroot)\fw\created.yaml" -Encoding utf8
+$fwmodified | Out-File "$($dictroot)\fw\modified.yaml" -Encoding utf8
+$fwpaused | Out-File "$($dictroot)\fw\paused.yaml" -Encoding utf8
+$fwpriority | Out-File "$($dictroot)\fw\priority.yaml" -Encoding utf8
+#DNS Dictionaries
+$DNSContent | Out-File "$($dictroot)\dns\content.yaml" -Encoding utf8
+$DNSCreatedOn | Out-File "$($dictroot)\dns\created_on.yaml" -Encoding utf8
+$DNSModifiedOn | Out-File "$($dictroot)\dns\modified_on.yaml" -Encoding utf8
+$DNSName | Out-File "$($dictroot)\dns\name.yaml" -Encoding utf8
+$DNSProxiable | Out-File "$($dictroot)\dns\proxiable.yaml" -Encoding utf8
+$DNSProxied | Out-File "$($dictroot)\dns\proxied.yaml" -Encoding utf8
+$DNSTTL | Out-File "$($dictroot)\dns\ttl.yaml" -Encoding utf8
+$DNSType | Out-File "$($dictroot)\dns\type.yaml" -Encoding utf8
+#Zone List Dictionary
+$zonelist | Out-File "$($dictroot)\auditzones.yaml" -Encoding utf8
 
 #Pull logs from all ELS enabled zones.
-#This will loop through all currently registered domains and, if they have an Enterprise Website plan, pull the logs.
-$RetFlagNot = @()
-$Zones = (Invoke-RestMethod @A "$($apibase)/zones?per_page=100").Result
-foreach ($zone in $zones) {
-  if ($zone.plan.name -eq "Enterprise Website") {
-    $Z = $zone.id
-    if (((Invoke-RestMethod @a "$($apibase)/zones/$z/logs/control/retention/flag").result.flag) -ne $true) {
-      $RetFlagNot += @{$zone.name=$zone.id}
-      } else {
-        $Fields = (Invoke-RestMethod @a -uri "$($apibase)/zones/$z/logs/received/fields").psobject.properties.name -join ","
-        $Known = "CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseBytes,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,SecurityLevel,WAFAction,WAFFlags,WAFMatchedVar,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID"
-        if ($Fields.length -ne $Known.length) {
-          #Create list of changes
-          $Change = Compare-Object ($known.Split(',')) ($fields.Split(',')) | Select -ExpandProperty InputObject | foreach {Write-Output "$_"`n}
-          #Determine whether or not to send notification based on existence of file in temp directory
-          $Notify = Test-Path C:\temp\FieldChange_$(Get-Date ($D) -Format MMddyyy_HH00).txt
-          #If file does not exist for the current hour, send notification
-          if ($Notify -eq $false) {
-          $Change | out-file C:\temp\FieldChange_$(Get-Date ($D) -Format MMddyyy_HH00).txt
-            if ($Fields.length -lt $Known.length) {
-              $Body = "The CloudFlare log pull script has detected a change in field availability:`n`nFields removed:`n" + $Change
-              Send-MailMessage -Body $Body -Encoding UTF8 -From $SmtpFrom -SmtpServer $SmtpServer -Subject "Change To CloudFlare Fields" -To $SmtpTo
-            } else {
-              $Body = "The CloudFlare log pull script has detected a change in field availability:`n`nFields added:`n" + $Change
-              Send-MailMessage -Body $Body -Encoding UTF8 -From $SmtpFrom -SmtpServer $SmtpServer -Subject "Change To CloudFlare Fields" -To $SmtpTo
-            }
-          }
+#This will loop through all Enterprise licensed domains and pull logs.
+foreach ($zone in $zonetable) {
+  if (((Invoke-RestMethod @a "$($apibase)/zones/$($zone.id)/logs/control/retention/flag").result.flag) -ne $true) {
+    $RetFlagNot += @{$zone.name=$zone.id}
+  } else {
+    #Get list of fields available and convert into string
+    $Fields = (Invoke-RestMethod @a -uri "$($apibase)/zones/$($zone.id)/logs/received/fields").psobject.properties.name -join ","
+    #List of known fields
+    $Known = "CacheCacheStatus,CacheResponseBytes,CacheResponseStatus,CacheTieredFill,ClientASN,ClientCountry,ClientDeviceType,ClientIP,ClientIPClass,ClientRequestBytes,ClientRequestHost,ClientRequestMethod,ClientRequestPath,ClientRequestProtocol,ClientRequestReferer,ClientRequestURI,ClientRequestUserAgent,ClientSSLCipher,ClientSSLProtocol,ClientSrcPort,ClientXRequestedWith,EdgeColoCode,EdgeColoID,EdgeEndTimestamp,EdgePathingOp,EdgePathingSrc,EdgePathingStatus,EdgeRateLimitAction,EdgeRateLimitID,EdgeRequestHost,EdgeResponseBytes,EdgeResponseCompressionRatio,EdgeResponseContentType,EdgeResponseStatus,EdgeServerIP,EdgeStartTimestamp,FirewallMatchesActions,FirewallMatchesRuleIDs,FirewallMatchesSources,OriginIP,OriginResponseBytes,OriginResponseHTTPExpires,OriginResponseHTTPLastModified,OriginResponseStatus,OriginResponseTime,OriginSSLProtocol,ParentRayID,RayID,SecurityLevel,WAFAction,WAFFlags,WAFMatchedVar,WAFProfile,WAFRuleID,WAFRuleMessage,WorkerCPUTime,WorkerStatus,WorkerSubrequest,WorkerSubrequestCount,ZoneID"
+    #Compare the length of Fields and Known. If different send notification
+    if ($Fields.length -ne $Known.length) {
+      #Create list of changes
+      $Change = Compare-Object ($known.Split(',')) ($fields.Split(',')) | Select -ExpandProperty InputObject | foreach {Write-Output "$_"`n}
+      #Determine whether or not to send notification based on existence of file in temp directory
+      $Notify = Test-Path "$($dictroot)\FieldChange_$(Get-Date ($D) -Format MMddyyy_HH00).txt"
+      #If file does not exist for the current hour, send notification
+      if ($Notify -eq $false) {
+      $Change | out-file "$($dictroot)\FieldChange_$(Get-Date ($D) -Format MMddyyy_HH00).txt"
+        if ($Fields.length -lt $Known.length) {
+          $Body = "CloudFlare log pull script has detected a change in field availability:`n`nFields removed:`n" + $Change
+          Send-MailMessage -Body $Body -Encoding UTF8 -From $SmtpFrom -SmtpServer $SmtpServer -Subject "CloudFlare Field Change" -To $SmtpTo
+        } else {
+          $Body = "CloudFlare log pull script has detected a change in field availability:`n`nFields added:`n" + $Change
+          Send-MailMessage -Body $Body -Encoding UTF8 -From $SmtpFrom -SmtpServer $SmtpServer -Subject "CloudFlare Field Change" -To $SmtpTo
         }
-        $R = Invoke-RestMethod @A "$($apibase)/zones/$z/logs/received?start=$S&end=$E&timestamps=unix&fields=$Fields"
-        #Performs a character check of the log request. If the resulting output is empty, no file will be saved.
-        if ($R.length -gt 0) {
-        $R | Out-File "$path\CloudFlare$T.txt" -Encoding utf8 -Append
       }
+    }
+    $R = Invoke-RestMethod @A "$($apibase)/zones/$($zone.id)/logs/received?start=$S&end=$E&timestamps=unix&fields=$Fields"
+    #Perform character check of $R, if output is empty no file will be saved.
+    if ($R.length -gt 0) {
+    $R | Out-File "$path\CloudFlare$T.txt" -Encoding utf8 -Append
     }
   }
 }
@@ -81,19 +149,20 @@ curl -X POST `"https://api.cloudflare.com/client/v4/zones/ZONEID/logs/control/re
 }
 
 #Pull Organization audit logs.
-$Since = (Get-Date ($D).AddMinutes(-6).AddSeconds(-($D).second) -Format yyyy-MM-ddThh:mm:ssZ)
-$L = Invoke-RestMethod @A -Uri "$($apibase)/organizations/$OrgId/audit_logs?per_page=1000&since=$Since" | Select -ExpandProperty Result
+$Since = (Get-Date ($D).AddMinutes(-7).AddSeconds(-($D).second) -Format yyyy-MM-ddThh:mm:ssZ)
+$L = (Invoke-RestMethod @A -Uri "$($apibase)/organizations/$($OrgId)/audit_logs?per_page=1000&since=$Since").Result
 if (($L.result.length) -gt 0) {
   foreach ($auditrecord in $L) {
     [array]$records += $auditrecord | ConvertTo-Json -Compress
   }
   $records | Out-File $path\CloudFlareAudit$T.log -Encoding utf8
 }
+
 #Archive the previous hours files and then delete them.
-$d = Get-Date
-$t = (Get-Date ($d).AddHours(-1) -UFormat %m%d%G_%H00) + ".zip"
-$s = ($d).AddMinutes(-($d).minute).AddSeconds(-($d).second).AddHours(-1)
-$e = ($d).AddMinutes(-($d).minute).AddSeconds(-($d).second).AddSeconds(-1)
+$T = (Get-Date ($D).AddHours(-1) -UFormat %m%d%G_%H00) + ".zip"
+$S = ($D).AddMinutes(-($D).minute).AddSeconds(-($D).second).AddHours(-1)
+$E = ($D).AddMinutes(-($D).minute).AddSeconds(-($D).second).AddSeconds(-1)
 Set-Location $path
-Get-ChildItem -Path $path -Recurse | Where-Object {$_.LastWritetime -gt $s -and $_.LastWriteTime -lt $e} | Compress-Archive -DestinationPath $ArchivePath\$t -Update
-Get-ChildItem -Path $path -Recurse | Where-Object {$_.LastWritetime -gt $s -and $_.LastWriteTime -lt $e} | Remove-Item
+Get-ChildItem -Path $path -Recurse | Where-Object {$_.LastWritetime -gt $S -and $_.LastWriteTime -lt $E} | Compress-Archive -DestinationPath $ArchivePath\$T -Update
+$E = ($D).AddMinutes(-($D).minute).AddSeconds(-($D).second).AddHours(-24)
+Get-ChildItem -Path $path -Recurse | Where-Object {$_.LastWriteTime -lt $E} | Remove-Item
