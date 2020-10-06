@@ -89,7 +89,7 @@ filter {
       id => "Audit Zone ID Translation"
       field => "[change][zone]"
       destination => "[change][zone_id]"
-      dictionary_path => "D:/Logstash/dictionaries/CloudFlare/cloudflareauditzones.yaml"
+      dictionary_path => "D:/Logstash/dictionaries/CloudFlare/auditzones.yaml"
       refresh_behaviour => "replace"
     }
     if [resource][type] == "dns_record" {
